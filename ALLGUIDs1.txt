@@ -1,0 +1,50 @@
+CustomerName,Key,guid
+UnitedKing,uk,b581cd4d-ff59-4643-aee2-1e239231560d
+Mehran,mehran,21237743-ccc5-4b3c-a0ba-8f312762b3ce
+Rainbow,rainbow,24707227-e18a-4b6b-9efe-4e20ed2962a9
+Image Fabrics,image,197c6391-d52b-4b5b-b1fa-30acd85222b8
+Foods Inn,foodsinn,aaf47997-3711-45a5-8ea2-bc5f45e768c4
+DawnPaperMart,dpm,6e105b92-8fe8-4bfb-8347-c244100f012c
+Royal Fashions,RoyalFashions,602c273c-8887-4ea4-bf98-5f4bca33a4cf
+MasterBiryani,MasterBiryani,13f73d25-ce65-40af-b849-49bd8717770f
+Rehmat-e-Sheerin,rs,445f32d3-e502-48c3-8b8c-5962f0abb923
+Milestone,milestone,1f67ae08-69df-425a-a1a2-c528a7fb32ad
+Springs,spring,e96a6ae5-6130-4bea-9b7c-56c5aa52109e
+BlackNBrown,blacknbrown,dbd07bf9-41d6-496d-a359-5bfc30b9d786
+Ochre,ochre,035f9d98-a4e6-44bb-a43d-41b24a4eb072
+WalkEaze,walkeaze,7e8a7786-b13f-4443-adc4-cc7bcc8a4e59
+Taana Baana,taanabaana,6a5d88e5-3e08-4960-8447-7d0fe74bb3a6
+Needz Super Mart,needz,4580d200-f764-4d3c-97c3-3458cedac65c
+Pie In the Sky,pits,f2d9522b-430d-4b92-9ffa-ed7e2e7fa309
+Gaba,gaba,3e8d2fbb-fd15-48e3-92f5-398d96c51c7a
+Dream Gifts,dreams,39e738cf-a73d-4745-ad05-c5449b16bdc6
+Big Thick Berger,btb,ed6610d6-76f9-4652-8b2d-39afac9b11ef
+New Way Super Store,newway,1e020f6e-0ce9-43f2-b271-b181ff7e38e5
+Shazz Supermart,shazz,ba396553-1dfa-4175-a451-ae668fe54f1b
+Califord,califord,1170774c-6b3f-4add-9c38-1cf2650d6715
+Brackets,brackets,8cd64935-9489-4652-a7dc-0eced68a4b49
+Royal International,royalint,1a9736f4-421f-47e7-b74e-25c500227472
+EasyMart,easymart,cc3bb4fb-29c0-4317-ba63-513386abbb67
+Afzal Clothes,acs,ba013568-923f-4ea4-afe2-28a2d2ef04f8
+Mazedar Foods,Mzf,39c3d71c-f61b-40c1-a207-45624fe67158
+Mohsin Saeed Fabric,msf,805fcb0e-9084-45c0-96c1-195664cc9689
+IHOP,ihop,02f4b4c6-6a37-4ba6-ab05-914fba47303d
+MaxBachat,maxbachat,c9fbaebf-541a-427b-be16-840704c40318
+JDB Optics,jdb,692efc5a-0c81-4e08-8904-5784cd47c622
+GlobalMart,globalmart,07e23a2f-f5da-4593-95ef-a77f955df342
+ACL,acl,6f14a29d-b0ac-4ea6-a919-bb55dac55004
+Limitless,limitless,96aa885b-70cc-47eb-912e-4be0510f7b97
+Ultra Club,ultraclub,af65fa95-38a9-4e9b-bdf1-0d8d50bc625e
+Café Imran,cafeimran,8d9a2c27-17e8-4213-9c99-62a5872bafe4
+AppieFarms,appiefarms,ba8021fa-6f43-4a32-b848-c18b9f7fcea3
+Max Mart,maxmart,e05164e1-d5f0-4e00-ba42-5f08d5a0ac1a
+StandardTea,standardtea,0c03c865-357f-4f31-b494-3338559de25c
+YasirBroast,yasirbroast,abd9c525-9845-4403-9dba-d525c140f2fe
+Nazarjan,nazarjan,f222dcbc-db96-46c7-8121-da482bad4259
+Kaybees,kaybees,fc742556-ad1f-4cc0-99d2-2538794cb362
+Burger O'Clock,burgeroclock,57d943f0-2bed-48ed-a083-539f9e854005
+kababjees,kababjees,b8a85d79-c8e9-4aa5-9dc7-a895ef674f5b
+Pak Medico,pakmedico,a44c04ef-e3d8-4ea0-8615-f157f2f06771
+Baby Care Mall,bcm,45166c70-65c1-4006-ad70-dc6310077d90
+RizwanGarments,,b2fc1d80-2c03-4a6a-90eb-6370dabcadc7
+Angeethi,WN7O4E,f1495c95-6220-40c8-8698-c96bb7199b2a
