@@ -1,0 +1,1304 @@
+using Google.Apis.Drive.v3.Data;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using Org.BouncyCastle.Bcpg;
+using Org.BouncyCastle.Utilities;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Data;
+using System.Data.SqlClient;
+using System.Diagnostics;
+using System.Drawing;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using System.Web;
+using System.Web.Http;
+using System.Web.Script.Serialization;
+using System.Web.UI.WebControls.WebParts;
+using System.Xml.Linq;
+using TSBE.DAL;
+using TSBE.Manager;
+using TSBE.Models;
+using TSBE.Models.Application;
+using TSBE.Utilities;
+//using static Google.Apis.Requests.BatchRequest;
+
+namespace TSBE.WEB.API.Controllers.Application
+{
+    [AuthorizationRequired, RoutePrefix("TSBE/TaskRegister"), ExceptionFilter]
+    public class TaskRegisterController : ApiController
+    {
+        [HttpGet, Route("LoadData")]
+        public IHttpActionResult LoadData()
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                List<object> TRList = new List<object>();
+                TaskRegisterManger trm = new TaskRegisterManger();
+                List<TaskType> ListTaskType = trm.GetUserTaskType(objUser.TSClient.ToString(), objUser.UserId);
+                ListTaskType = ListTaskType.Where(x => x.IsSelected == true).ToList();
+                TRList.Add(ListTaskType);
+                List<ActivityStatus> ListTaskStatus = trm.GetTaskStatus(objUser.TSClient.ToString());
+                TRList.Add(ListTaskStatus);
+                List<Priority> priorities = trm.GetPriority(objUser.TSClient.ToString());
+                TRList.Add(priorities);
+                List<ClientInformation> ClientList = trm.GetAllClient(objUser.TSClient.ToString());
+                TRList.Add(ClientList);
+                List<EmployeeInformation> EmployeeList = trm.GetEmployeeList(objUser.TSClient.ToString(), "", objUser.CompanyBranchId.ToString(), "", "1,2,5,6");
+                TRList.Add(EmployeeList);
+                List<EmployeeInformation> FollowUpUsersCollection = trm.GetEmployeeListForFollowUpUser(objUser.TSClient.ToString(), "", objUser.CompanyBranchId.ToString(), "", "1,2,5,6");
+                TRList.Add(FollowUpUsersCollection);
+                return Ok(TRList);
+            }
+            else
+                return Content(HttpStatusCode.Unauthorized, "You are not authorized");
+        }
+        [HttpGet, Route("GetTasks")]
+        public IEnumerable<TaskRegisterDetail> GetTasks(DateTime startDate, DateTime endDate, string dateType, string tasktypeIds)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                TaskRegisterManger trm = new TaskRegisterManger();
+                var obj = trm.GetTasks(objUser.TSClient.ToString(), startDate, endDate, dateType, tasktypeIds);
+                if (obj != null && obj.Count > 0)
+                {
+                    foreach (var item in obj)
+                    {
+                        if (item.ImageArr != null)
+                        {
+                            item.Image64 = "data:image/jpeg;base64," + System.Convert.ToBase64String(CreateThumbnail(item.ImageArr, 50));
+                            item.ImageArr = null;
+                        }
+                    }
+                    return obj.ToList();
+                }
+                else
+                    throw new Exception("Data not found");
+            }
+            else
+                throw new HttpResponseException(Request.CreateErrorResponse(HttpStatusCode.Unauthorized, "You are not authorized"));
+        }
+
+        [HttpGet, Route("GetTasksSummary")]
+        public HttpResponseMessage GetTasksSummary(DateTime StartDate, DateTime EndDate, string DateType, string ClientInformationIds = "", string EmployeeInformationIds = "")
+        {
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser?.UserId > 0)
+                {
+                    var ds = new EntityBase(objUser.TSClient.ToString()).GetDataSet("web.spDashboardTaskRegister", new string[] {
+                    "@Type", "@FromDate", "@ToDate", "@DateType", "ClientInformationIds", "@EmployeeInformationIds", "@UserId"}, 3, StartDate, EndDate, DateType, ClientInformationIds, EmployeeInformationIds, objUser.UserId);
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(ds), System.Text.Encoding.UTF8, "application/json") };
+                }
+                else
+                {
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{ \"authorization\" : \"Un authorized\" }", System.Text.Encoding.UTF8, "application/json") };
+                }
+            }
+            catch (Exception exc)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{ \"error\" : \"" + exc.Message + "\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+        }
+
+        [HttpGet, Route("GetTasks2")]
+        public HttpResponseMessage GetTasks2(DateTime StartDate, DateTime EndDate, string DateType, string ClientInformationIds = "", string TaskTypeIds = "", string PriorityIds = "", string ActivityStatausIds = "", int? TaskRegisterId = null
+            , string EmployeeInformationIds = "")
+        {
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser?.UserId > 0)
+                {
+                    var ds = new EntityBase(objUser.TSClient.ToString()).GetDataSet("web.spDashboardTaskRegister", new string[] {
+                    "@Type", "@FromDate", "@ToDate", "@DateType", "ClientInformationIds", "@TaskTypeIds", "@PriorityIds", "@ActivityStatusIds", "@TaskRegisterIds", "@EmployeeInformationIds","@UserId"}
+                    , 4, StartDate, EndDate, DateType, ClientInformationIds, TaskTypeIds, PriorityIds, ActivityStatausIds, TaskRegisterId, EmployeeInformationIds, objUser.UserId);
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(ds), System.Text.Encoding.UTF8, "application/json") };
+                }
+                else
+                {
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{ \"authorization\" : \"Unauthorized\" }", System.Text.Encoding.UTF8, "application/json") };
+                }
+            }
+            catch (Exception exc)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{ \"error\" : \"" + exc.Message + "\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+        }
+
+        [HttpGet, Route("GetActivity")]
+        public HttpResponseMessage GetActivity(string TaskRegisterIds)
+        {
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser?.UserId > 0)
+                {
+                    var ds = new EntityBase(objUser.TSClient.ToString()).GetDataSet("web.spDashboardTaskRegister", new string[] { "@Type", "@TaskRegisterIds" }, 6, TaskRegisterIds);
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonConvert.SerializeObject(ds), System.Text.Encoding.UTF8, "application/json") };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{ \"authorization\" : \"Unauthorized\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+            catch (Exception exc)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{ \"error\" : \"" + exc.Message + "\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+        }
+
+        [HttpGet, Route("InsertDeviceIdForSubscription")]
+        public HttpResponseMessage InsertDeviceIdForSubscription(int UserId, string DeviceId)
+        {
+            try
+            {
+                JObject obj = new JObject();
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser?.UserId > 0)
+                {
+                    var ds = new EntityBase(objUser.TSClient.ToString()).GetDataSet("WEB.spDashboardAPI", new string[] { "@Type", "@UserId", "@DeviceId" }, new object[] { 32, UserId, DeviceId });
+                    if (ds.Tables[0].Rows.Count > 0)
+                    {
+                        foreach (DataRow rdr in ds.Tables[0].Rows)
+                        {
+                            if (rdr["Status"] != DBNull.Value)
+                            {
+                                obj["Status"] = rdr["Status"].ToString();
+                            }
+                        }
+                    }
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(obj), System.Text.Encoding.UTF8, "application/json") };
+                }
+                else
+                {
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{ \"authorization\" : \"Unauthorized\" }", System.Text.Encoding.UTF8, "application/json") };
+                }
+            }
+            catch (Exception exc)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{ \"error\" : \"" + exc.Message + "\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+        }
+
+
+        [HttpGet, Route("SendFcmNotification")]
+        public HttpResponseMessage SendFcmNotification(int TaskRegisterActivityId = 0, int TaskRegisterId = 0)
+        {
+            JObject jObj = new JObject();
+            jObj["success"] = 0;
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser?.UserId > 0)
+                {
+                    string fcmtoken = "";
+                    //string PushNotif = "";
+                    int SubscriptionId = 0;
+                    var e = new EntityBase(objUser.TSClient.ToString());
+                    var ds = e.GetDataSet("WEB.spDashboardAPI", new string[] { "@Type", "@TaskRegisterActivityId", "@TaskRegisterId" }, new object[] { 34, Convert.ToInt32(TaskRegisterActivityId), Convert.ToInt32(TaskRegisterId) });
+                    if (ds.Tables[0].Rows.Count > 0)
+                    {
+                        foreach (DataRow rdr in ds.Tables[0].Rows)
+                        {
+                            if (rdr["SubscriptionId"] != DBNull.Value)
+                            {
+                                SubscriptionId = Convert.ToInt32(rdr["SubscriptionId"]);
+                            }
+                            if (rdr["DeviceId"] != DBNull.Value)
+                            {
+                                fcmtoken = rdr["DeviceId"].ToString();
+                                //PushNotif = SendFCMPushNotification(fcmtoken, ds.Tables[0]);                                                             
+                            }
+                            if (fcmtoken != "")
+                            {
+
+                                // Send Notification Start
+                                TextInfo textInfo = new CultureInfo("en-US", false).TextInfo;
+                                // From: https://console.firebase.google.com/project/x.y.z/settings/general/android:x.y.z
+
+                                // Projekt-ID: x.y.z
+                                // Web-API-Key: A...Y (39 chars)
+                                // App-ID: 1:...:android:...
+
+                                // From https://console.firebase.google.com/project/x.y.z/settings/
+                                // cloudmessaging/android:x,y,z
+                                // Server-Key: AAAA0...    ...._4
+
+                                string serverKey = "AAAAH_q8vxo:APA91bH7LKt-M_mH95ERJRWinm1_JkjbBCadG3zCyow_8EHilpYd2xsMsi_dzeIN9sVElId_G6t8rJsDh6tpLQv7MPkNr8H3htzH6FBffqU8QBti_rl7FFl8jU5o7yIj3ZB8bl-qAjmg"; // Something very long
+                                string senderId = "137350659866";
+                                //string deviceId = "dj9...c:APA...    .....WTw"; // Also something very long, 
+                                // got from android
+                                string deviceId = fcmtoken;           // Use this to notify all devices, 
+                                                                      // but App must be subscribed to 
+                                                                      // topic notification
+                                WebRequest tRequest = WebRequest.Create("https://fcm.googleapis.com/fcm/send");
+
+                                tRequest.Method = "post";
+                                tRequest.ContentType = "application/json";
+
+                                var mydata = new
+                                {
+                                    to = deviceId,
+                                    notification = new
+                                    {
+                                        body = rdr["JobDescription"].ToString(),
+                                        title = rdr["TaskNumber"].ToString() + " - " + rdr["Title"].ToString(),
+                                        android_channel_id = "PushNotifications",
+                                        sound = "Enabled",
+                                    },
+                                    data = new
+                                    {
+                                        TaskRegisterId = rdr["TaskRegisterId"].ToString(),
+                                        TaskRegisterDetailId = rdr["TaskRegisterDetailId"].ToString(),
+                                    }
+
+                                };
+
+                                var serializer = new JavaScriptSerializer();
+
+                                var json = serializer.Serialize(mydata);
+                                Byte[] byteArray = Encoding.UTF8.GetBytes(json);
+                                tRequest.Headers.Add(string.Format("Authorization: key={0}", serverKey));
+                                tRequest.Headers.Add(string.Format("Sender: id={0}", senderId));
+                                tRequest.ContentLength = byteArray.Length;
+
+                                using (Stream dataStream = tRequest.GetRequestStream())
+                                {
+                                    dataStream.Write(byteArray, 0, byteArray.Length);
+                                    using (WebResponse tResponse = tRequest.GetResponse())
+                                    {
+                                        using (Stream dataStreamResponse = tResponse.GetResponseStream())
+                                        {
+                                            using (StreamReader tReader = new StreamReader(dataStreamResponse))
+                                            {
+                                                String sResponseFromServer = tReader.ReadToEnd();
+                                                var resp = sResponseFromServer;
+                                                var deserialize = Newtonsoft.Json.JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(resp);
+                                                jObj["success"] = deserialize["success"];
+                                                if (Convert.ToInt32(jObj["success"]) == 1)
+                                                {
+                                                    e.UpdateRecord("web.spDashboardAPI", new string[] { "@Type", "@SubscriptionId" }
+                                                     , new object[] { 35, SubscriptionId });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Send Notification End
+                    }
+
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(jObj), System.Text.Encoding.UTF8, "application/json") };
+                }
+                else
+                {
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(jObj), System.Text.Encoding.UTF8, "application/json") };
+                    //return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{ \"authorization\" : \"Unauthorized\" }", System.Text.Encoding.UTF8, "application/json") };
+                }
+            }
+            catch (Exception exc)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(jObj), System.Text.Encoding.UTF8, "application/json") };
+                //return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{ \"error\" : \"" + exc.Message + "\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+        }
+
+        [HttpGet, Route("GetEmployeeImage")]
+        public string GetEmployeeImage(int id)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                TaskRegisterManger trm = new TaskRegisterManger();
+                var obj = trm.GetEmployeeImage(objUser.TSClient.ToString(), id);
+                if (obj != null)
+                {
+                    return "data:image/jpeg;base64," + System.Convert.ToBase64String(obj);
+                }
+                else
+                    return "data:image/jpeg;base64,";
+            }
+            else
+                throw new HttpResponseException(Request.CreateErrorResponse(HttpStatusCode.Unauthorized, "You are not authorized"));
+        }
+
+
+        public static byte[] CreateThumbnail(byte[] PassedImage, int LargestSide)
+        {
+            byte[] ReturnedThumbnail;
+
+            using (MemoryStream StartMemoryStream = new MemoryStream(),
+                                NewMemoryStream = new MemoryStream())
+            {
+                // write the string to the stream  
+                StartMemoryStream.Write(PassedImage, 0, PassedImage.Length);
+
+                // create the start Bitmap from the MemoryStream that contains the image  
+                Bitmap startBitmap = new Bitmap(StartMemoryStream);
+
+                // set thumbnail height and width proportional to the original image.  
+                int newHeight;
+                int newWidth;
+                double HW_ratio;
+                if (startBitmap.Height > startBitmap.Width)
+                {
+                    newHeight = LargestSide;
+                    HW_ratio = (double)((double)LargestSide / (double)startBitmap.Height);
+                    newWidth = (int)(HW_ratio * (double)startBitmap.Width);
+                }
+                else
+                {
+                    newWidth = LargestSide;
+                    HW_ratio = (double)((double)LargestSide / (double)startBitmap.Width);
+                    newHeight = (int)(HW_ratio * (double)startBitmap.Height);
+                }
+
+                // create a new Bitmap with dimensions for the thumbnail.  
+                Bitmap newBitmap = new Bitmap(newWidth, newHeight);
+
+                // Copy the image from the START Bitmap into the NEW Bitmap.  
+                // This will create a thumnail size of the same image.  
+                newBitmap = ResizeImage(startBitmap, newWidth, newHeight);
+
+                // Save this image to the specified stream in the specified format.  
+                newBitmap.Save(NewMemoryStream, System.Drawing.Imaging.ImageFormat.Jpeg);
+
+                // Fill the byte[] for the thumbnail from the new MemoryStream.  
+                ReturnedThumbnail = NewMemoryStream.ToArray();
+            }
+
+            // return the resized image as a string of bytes.  
+            return ReturnedThumbnail;
+        }
+        private static Bitmap ResizeImage(Bitmap image, int width, int height)
+        {
+            Bitmap resizedImage = new Bitmap(width, height);
+            using (Graphics gfx = Graphics.FromImage(resizedImage))
+            {
+                gfx.DrawImage(image, new Rectangle(0, 0, width, height),
+                    new Rectangle(0, 0, image.Width, image.Height), GraphicsUnit.Pixel);
+            }
+            return resizedImage;
+        }
+        [HttpGet, Route("GetClient")]
+        public ClientInformation GetClient(int clientInfoId)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                TaskRegisterManger trm = new TaskRegisterManger();
+                var obj = trm.GetClient(objUser.TSClient.ToString(), clientInfoId);
+                if (obj != null)
+                {
+                    return obj;
+                }
+                else
+                    throw new Exception("Client not found");
+            }
+            else
+                throw new HttpResponseException(Request.CreateErrorResponse(HttpStatusCode.Unauthorized, "You are not authorized"));
+        }
+        [HttpGet, Route("GetContactPerson")]
+        public ClientInformation GetContactPerson(int clientInfoId)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                ClientInformationManager cim = new ClientInformationManager();
+                var contactPersonList = cim.getcontactPerson(objUser.TSClient.ToString(), clientInfoId);
+                TaskRegisterManger trm = new TaskRegisterManger();
+                var obj = trm.GetContactPerson(objUser.TSClient.ToString(), clientInfoId, contactPersonList);
+                if (obj != null)
+                {
+                    return obj;
+                }
+                else
+                    throw new Exception("Client not found");
+            }
+            else
+                throw new HttpResponseException(Request.CreateErrorResponse(HttpStatusCode.Unauthorized, "You are not authorized"));
+        }
+        [HttpPost, Route("SaveUpdateTicketRecord")]
+        public IHttpActionResult SaveUpdateTicketRecord(TaskRegisterDetail param)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                TaskRegisterManger trm = new TaskRegisterManger();
+                SoftwareConfigurationController cc = new SoftwareConfigurationController();
+                string response = trm.SaveUpdateTicketRecord(objUser.TSClient.ToString(), objUser, param, new SoftwareConfigurationManager().GetConfigurationValue(objUser.TSClient.ToString(), "TaskNumberGenerationMethod"));
+                if (response.Length > 0)
+                {
+                    return Ok(response);
+                }
+                else
+                    return Content(HttpStatusCode.BadRequest, "Unable to save/update ticket");
+            }
+            else
+                return Content(HttpStatusCode.Unauthorized, "You are not authorized");
+        }
+
+
+        [HttpPost, Route("UploadVideoFile")]
+        public HttpResponseMessage UploadVideoFiles()
+        {
+            try
+            {
+
+                //Create the Directory.
+                string path = HttpContext.Current.Server.MapPath("~/Video Attachments/");
+                if (!Directory.Exists(path))
+                {
+                    Directory.CreateDirectory(path);
+                }
+
+                //Save the Files.
+                foreach (string key in HttpContext.Current.Request.Files)
+                {
+                    HttpPostedFile postedFile = HttpContext.Current.Request.Files[key];
+                    postedFile.SaveAs(path + postedFile.FileName);
+                }
+
+                //Send OK Response to Client.
+                return Request.CreateResponse(HttpStatusCode.OK);
+            }
+            catch (Exception e)
+            {
+                return Request.CreateResponse(HttpStatusCode.BadRequest, e.Message);
+            }
+        }
+
+        [HttpPost, Route("SaveUpdateTicketRecord2")]
+        public async Task<HttpResponseMessage> SaveUpdateTicketRecord2()
+        {
+            string videoPath = HttpContext.Current.Server.MapPath("~/Video Attachments");
+            string audioPath = HttpContext.Current.Server.MapPath("~/Audio");
+
+            var provider = new MultipartFormDataStreamProvider(videoPath);
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+
+                if (objUser == null || objUser.UserId == 0)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{\"inavlid request:\":\"Invalid Authorization!\"}", System.Text.Encoding.UTF8, "application/json") };
+                }
+
+                DAL.EntityBase e = new DAL.EntityBase(objUser.TSClient.ToString());
+                // Check if the request contains multipart/form-data.
+                if (!Request.Content.IsMimeMultipartContent())
+                {
+                    return new HttpResponseMessage(HttpStatusCode.UnsupportedMediaType) { Content = new StringContent("{\"inavlid request:\":\"Unsupported Media Type!\"}", System.Text.Encoding.UTF8, "application/json") };
+                }
+
+                await Request.Content.ReadAsMultipartAsync(provider);
+
+                JObject formData = JsonConvert.DeserializeObject<JObject>(provider.FormData.Get("data"));
+
+                using (SqlConnection con = new SqlConnection(e.ConnectionString))
+                {
+                    var TicketId = 0;
+                    SqlTransaction trans = null;
+                    try
+                    {
+                        con.Open();
+                        trans = con.BeginTransaction();
+
+                        #region  Task_Insert
+                        // int Task_Insert()
+                        // {
+                        string TransactionNumber = null;
+                        int? UniqueNumberId = null;
+
+                        if (new SoftwareConfigurationManager().GetConfigurationValue(objUser.TSClient.ToString(), "TaskNumberGenerationMethod") == "1")
+                        {
+                            DataTable dt = e.GetDataTable("spGenerateUniqueNo", new string[] { "@Type", "@CompanyBranchId", "@DocumentDate", "@DocumentNumberFormatId" }, new object[] { 0, objUser.CompanyBranchId, DateTime.Now.Date, 65 });
+
+                            if (dt?.Rows?.Count > 0 && !dt.Rows[0].IsNull(0))
+                            {
+                                TransactionNumber = dt.Rows[0].Field<int>(2).ToString();
+                                UniqueNumberId = dt.Rows[0].Field<int>(0);
+                            }
+                            else
+                            {
+                                throw new Exception("Couldn't Generate Task Number");
+                            }
+                        }
+                        else
+                        {
+                            DataTable dt = e.GetDataTable("spTaskregister", new string[] { "@Type", "@CompanyBranchId", "@TaskTypeId" }, new object[] { 1, objUser.CompanyBranchId, provider.FormData.Get("TaskTypeId") });
+
+                            if (dt?.Rows?.Count > 0 && !dt.Rows[0].IsNull(0))
+                            {
+                                TransactionNumber = dt.Rows[0].Field<int>(0).ToString();
+                            }
+                            else
+                            {
+                                throw new Exception("Couldn't Generate Task Number");
+                            }
+                        }
+
+                        TicketId = e.InsertRecordWithExecuteScalar(trans, con, "dbo.spTaskRegisterDetail", new string[]
+                             { "@Type","@TransactionNumber", "@TaskTypeId", "@PriorityId", "@ClientInformationId", "@EmployeeInformationId"
+                             , "@ContactPersonId", "@JobTypeId", "@TaskTitle",  "@JobDescription", "@CommunicateTypeId", "@CompanyBranchId", "@UserId"},
+                             13, TransactionNumber, Convert.ToInt32(formData["TaskTypeId"]), Convert.ToInt32(formData["PriorityId"]), (int?)formData["ClientInformationId"], (int?)formData["EmployeeInformationId"]
+                             , (int?)formData["ContactPersonId"], Convert.ToInt32(formData["JobTypeId"]), Convert.ToString(formData["Title"]), Convert.ToString(formData["Description"]), (int?)formData["CommunicateTypeId"], objUser.CompanyBranchId, objUser.UserId); ;
+
+                        if (TicketId > 0 && UniqueNumberId > 0)
+                        {
+                            e.UpdateRecord("spGenerateUniqueNo", new string[] { "@Type", "@ParUniqueNumber", "@ParUniqueNumberId" }, 1, TransactionNumber, UniqueNumberId);
+                        }
+                        //  return TicketId;
+                        // }
+                        #endregion
+
+                        //files
+                        foreach (MultipartFileData file in provider.FileData)
+                        {
+                            string fileName = file.Headers.ContentDisposition.FileName;
+                            if (fileName.StartsWith("\"") && fileName.EndsWith("\""))
+                            {
+                                fileName = fileName.Trim('"');
+                            }
+                            if (fileName.Contains(@"/") || fileName.Contains(@"\"))
+                            {
+                                fileName = Path.GetFileName(fileName);
+                            }
+
+                            bool isAudioVideo = new string[] { "mp4", "avi", "mpg", "qt", "mov", "3gp", ".webm", "wav", "aiff", "mp3", "aac", "wma", "opus" }.Any(x => x == fileName.Split('.').Last().ToLower());
+                            bool isAudio = new string[] { "wav", "aiff", "mp3", "aac", "wma", "opus" }.Any(x => x == fileName.Split('.').Last().ToLower());
+
+                            e.UpdateRecord(trans, con, "dbo.spTaskRegisterDetail", new string[]
+                                { "@Type", "@DocumentName", "@Attachments", "@FileExtension", "@ClientInformationId", "@CompanyId", "@CompanyBranchId","@TaskRegisterId" ,"@UserId"},
+                                   14, TicketId.ToString() + "-" + fileName, isAudioVideo == false ? System.IO.File.ReadAllBytes(file.LocalFileName) : null, "." + fileName.Split('.').Last()
+                                   , Convert.ToInt32(formData["ClientInformationId"]), objUser.CompanyId, objUser.CompanyBranchId, TicketId, objUser.UserId);
+                            if (isAudioVideo)
+                            {
+                                System.IO.File.Move(file.LocalFileName, Path.Combine(isAudio == true ? audioPath : videoPath, TicketId.ToString() + "-" + fileName));
+                            }
+                            else
+                            {
+                                System.IO.File.Delete(file.LocalFileName);
+                            }
+                        }
+
+                        trans.Commit();
+                        con.Close();
+
+                        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"TaskRegisterId\": " + TicketId + ",\"TaskNumber\": \"" + TransactionNumber + "\"}", Encoding.UTF8, "application/json") };
+                    }
+                    catch (Exception exc)
+                    {
+                        if (con.State == ConnectionState.Open && trans != null)
+                        {
+                            trans.Rollback();
+                            con.Close();
+                        }
+                        //return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{\"error:\":\"" + exc.Message + "\"}", System.Text.Encoding.UTF8, "application/json") };
+                        throw new Exception(exc.Message);
+                    }
+                }
+            }
+            catch (Exception exc)
+            {
+                //delete files
+                foreach (MultipartFileData file in provider.FileData)
+                {
+                    System.IO.File.Delete(file.LocalFileName);
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{\"error:\":\"" + exc.Message + "\"}", System.Text.Encoding.UTF8, "application/json") };
+            }
+        }
+
+        [HttpGet, Route("GetTaskRegisterDetails")]
+        public IEnumerable<TaskRegisterActivity> GetTaskRegisterDetails(DateTime startDate, DateTime endDate, string TaskTypeIds,
+            string TaskStatusIds, int ClientInformationId, string nOpenByEmployeeIds, string nAssignToEmployeeIds, string nAssignByEmployeeIds,
+            string FollowUpToEmployeeInformationIds, string FollowUserEmployeeInformationIds, string TaskNumber, string ReferenceNumber, int IsDeliveryDate)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                string TaskPrefix = "";
+                string RefNumber = "";
+                int TransactionNumber = 0;
+                if (TaskNumber != null && TaskNumber.Length > 0)
+                {
+                    startDate = new DateTime(1900, 01, 01, 00, 00, 00);
+                    endDate = DateTime.Now;
+                    var numAlpha = new Regex("(?<Numeric>[0-9]*)(?<Alpha>[a-zA-Z]*)");
+                    var match = numAlpha.Match(TaskNumber.Trim());
+                    if (string.IsNullOrWhiteSpace(match.Groups["Alpha"].Value) || string.IsNullOrEmpty(match.Groups["Numeric"].Value))
+                    {
+                        numAlpha = new Regex("(?<Alpha>[a-zA-Z]*)(?<Numeric>[0-9]*)");
+                        match = numAlpha.Match(TaskNumber.Trim());
+                        TaskPrefix = match.Groups["Alpha"].Value;
+                        if (!string.IsNullOrEmpty(match.Groups["Numeric"].Value))
+                            TransactionNumber = Convert.ToInt32(match.Groups["Numeric"].Value);
+                        else
+                            TransactionNumber = 0;
+                    }
+                }
+                TaskRegisterManger trm = new TaskRegisterManger();
+                // int IsDeliveryDate = 2;
+                string CompanyBranchIds = "";
+
+                string nAssignToDeptIds = "";
+                bool IsAndClause = false;
+                string FollowUpStatusIds = "";
+                EmployeeInformationManager eim = new EmployeeInformationManager();
+                int? DepartmentId = null;
+
+                EmployeeInformation obj = eim.GetEmployeeInformation(objUser.TSClient.ToString(), objUser.EmployeeName).
+                    Where(e => e.EmployeeInformationId == objUser.EmployeeInformationId).FirstOrDefault();
+                if (obj != null)
+                {
+                    DepartmentId = obj.DepartmentId;
+                }
+                List<TaskRegisterActivity> trd = trm.GetTaskRegisterDetails(objUser.TSClient.ToString(), objUser.UserId, TransactionNumber, TaskPrefix,
+                    RefNumber, startDate, endDate, objUser.DataEntryStatus, objUser.CompanyBranchId,
+                    objUser.EmployeeInformationId, DepartmentId, TaskTypeIds ?? "", IsDeliveryDate, CompanyBranchIds, ClientInformationId,
+                    nOpenByEmployeeIds ?? "", nAssignToEmployeeIds ?? "", nAssignToDeptIds ?? "", nAssignByEmployeeIds ?? "", IsAndClause,
+                    FollowUpToEmployeeInformationIds ?? "", FollowUserEmployeeInformationIds ?? "", FollowUpStatusIds ?? "", 0, TaskStatusIds ?? "");
+                //List<TaskRegisterDetail> trd = trm.GetTaskRegisterDetails(objUser.TSClient.ToString(), objUser.UserId, startDate, endDate, DateFilter);
+
+                if (trd != null && trd.Count > 0)
+                {
+                    return trd;
+                }
+                else
+                    throw new Exception("Data not found");
+            }
+            else
+                throw new HttpResponseException(Request.CreateErrorResponse(HttpStatusCode.Unauthorized, "You are not authorized"));
+        }
+        [HttpGet, Route("DeleteTicketRecord")]
+        public IHttpActionResult DeleteTicketRecord(int TaskRegisterId)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                if (TaskRegisterManger.DeleteTicketRecord(objUser.TSClient.ToString(), TaskRegisterId))
+                {
+                    return Ok("Ticket closed successfully!");
+                }
+                else
+                    return Content(HttpStatusCode.BadRequest, "Unable to delete Ticket record");
+            }
+            else
+                return Content(HttpStatusCode.Unauthorized, "You are not authorized");
+        }
+        [HttpGet, Route("GetDocumentAttachment")]
+        public IHttpActionResult GetDocumentAttachments(int TaskRegisterId)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                List<DocumentAttachment> DocAttachList = TaskRegisterManger.GetDocumentAttachments(objUser.TSClient.ToString(), TaskRegisterId);
+                if (DocAttachList != null && DocAttachList.Count > 0 && DocAttachList[0].Attachments != null)
+                {
+                    foreach (DocumentAttachment file in DocAttachList)
+                    {
+                        if (file.DocumentAttachmentsId > 0)
+                            file.File = Convert.ToBase64String(file.Attachments);
+                    }
+                    return Ok(DocAttachList);
+                }
+                else
+                    return Content(HttpStatusCode.BadRequest, "Unable to fetch attachment(s)");
+            }
+            else
+                return Content(HttpStatusCode.Unauthorized, "You are not authorized");
+        }
+
+
+
+        [HttpGet, Route("GetAttachment")]
+        public IHttpActionResult GetAttachments(int TaskRegisterDetailId)
+        {
+
+
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                List<DocumentAttachment> DocAttachList = TaskRegisterManger.GetDocuments(objUser.TSClient.ToString(), TaskRegisterDetailId);
+                if (DocAttachList != null && DocAttachList.Count > 0 && DocAttachList[0].Attachments != null)
+                {
+                    foreach (DocumentAttachment file in DocAttachList)
+                    {
+
+                        if (file.DocumentAttachmentsId > 0)
+                        {
+                            file.File = Convert.ToBase64String(file.Attachments);
+
+                        }
+
+                    }
+                    return Ok(DocAttachList);
+                }
+                else
+                    return Content(HttpStatusCode.BadRequest, "Unable to fetch attachment(s)");
+            }
+            else
+                return Content(HttpStatusCode.Unauthorized, "You are not authorized");
+        }
+
+
+        [HttpGet, Route("GetTicketStatus")]
+        public IHttpActionResult GetTicketStatus(int ActivityStatusId)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                List<ActivityStatus> ActivityStatus = TaskRegisterManger.GetActivityStatus(objUser.TSClient.ToString(), ActivityStatusId);
+                if (ActivityStatus != null && ActivityStatus.Count > 0)
+                {
+                    return Ok(ActivityStatus);
+                }
+                else
+                    return Content(HttpStatusCode.BadRequest, "Unable to fetch ticket status(es)");
+            }
+            else
+                return Content(HttpStatusCode.Unauthorized, "You are not authorized");
+        }
+        [HttpGet, Route("UpdateTicketStatus")]
+        public IHttpActionResult UpdateTicketStatus(int TaskRegisterDetailId, int ActivityStatusId, string JobDescription)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                if (TaskRegisterManger.UpdateActivityStatus(objUser.TSClient.ToString(), TaskRegisterDetailId, ActivityStatusId, JobDescription, objUser.UserId))
+                {
+                    return Ok("Updated Successfully");
+                }
+                else
+                    return Content(HttpStatusCode.BadRequest, "Unable to fetch ticket status(es)");
+            }
+            else
+                return Content(HttpStatusCode.Unauthorized, "You are not authorized");
+        }
+        [HttpGet, Route("GetContactPersonDetails")]
+        public IHttpActionResult GetContactPersonDetails(int ContactPersonId)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                List<ContactNumber> ContactPersons = TaskRegisterManger.GetContactPersonById(objUser.TSClient.ToString(), ContactPersonId);
+                if (ContactPersons != null && ContactPersons.Count > 0)
+                {
+                    return Ok(ContactPersons);
+                }
+                else
+                    return Ok();
+            }
+            else
+                return Content(HttpStatusCode.Unauthorized, "You are not authorized");
+        }
+        [HttpPost, Route("AddTaskRegisterComment")]
+        public IHttpActionResult AddTaskRegisterComment(TaskRegisterComment objTRC)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                bool result = TaskRegisterManger.AddTaskRegisterComment(objUser.TSClient.ToString(), objTRC.TaskRegisterDetailId, objTRC.CommentsTypeId, objTRC.Comment, objTRC.ShortComment, objUser.CompanyBranchId, objUser.UserId);
+                if (result)
+                {
+                    return Ok("Saved successfully");
+                }
+                else
+                    return Ok("Unable to save please try again");
+            }
+            else
+                return Content(HttpStatusCode.Unauthorized, "You are not authorized");
+        }
+        [HttpGet, Route("GetTaskRegisterComments")]
+        public IHttpActionResult GetTaskRegisterComments(int TaskRegisterDetailId)
+        {
+            UserServices us = new UserServices();
+            var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+            if (objUser != null && objUser.UserId > 0)
+            {
+                List<TaskRegisterComment> comments = TaskRegisterManger.GetTaskRegisterComments(objUser.TSClient.ToString(), TaskRegisterDetailId, objUser.UserId);
+                if (comments != null && comments.Count > 0)
+                {
+                    //comments.ForEach(c => c.DataEntryDate = c.DataEntryDate.ToLocalTime());
+                    return Ok(comments);
+                }
+                else
+                    return Content(HttpStatusCode.BadRequest, "Unable to fetch ticket status(es)");
+            }
+            else
+                return Content(HttpStatusCode.Unauthorized, "You are not authorized");
+        }
+        [HttpPost, Route("TasksAnalysis")]
+        public HttpResponseMessage TasksAnalysis([FromBody] List<ReportParameter> postParams)
+        {
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser?.UserId > 0)
+                {
+                    var u = new BEUtilitiesController();
+                    var pars = u.CreateParams(postParams, postParams.Count + 2, "@");
+                    pars.pars[postParams.Count] = "@UserId";
+                    pars.vals[postParams.Count] = objUser.UserId;
+                    pars.pars[postParams.Count + 1] = "@Type";
+                    pars.vals[postParams.Count + 1] = 5;
+
+                    DataSet ds = new EntityBase(objUser.TSClient.ToString()).GetDataSet("web.spDashboardTaskRegister", pars.pars, pars.vals);
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(ds), System.Text.Encoding.UTF8, "application/json") };
+                }
+                else
+                {
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{ \"authorization\" : \"Unauthorized\" }", System.Text.Encoding.UTF8, "application/json") };
+                }
+            }
+            catch (Exception exc)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{ \"error\": \"" + exc.Message + "\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+        }
+
+        [HttpPost, Route("TasksAnalysis2")]
+        public HttpResponseMessage TasksAnalysis2([FromBody] List<ReportParameter> postParams)
+        {
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser?.UserId > 0)
+                {
+                    var u = new BEUtilitiesController();
+                    var pars = u.CreateParams(postParams, postParams.Count + 2, "@");
+                    pars.pars[postParams.Count] = "@UserId";
+                    pars.vals[postParams.Count] = objUser.UserId;
+                    pars.pars[postParams.Count + 1] = "@Type";
+                    pars.vals[postParams.Count + 1] = 1;
+
+                    DataSet ds = new EntityBase(objUser.TSClient.ToString()).GetDataSet("web.spDashboardTaskRegister2", pars.pars, pars.vals);
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(ds), Encoding.UTF8, "application/json") };
+                }
+                else
+                {
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{ \"authorization\" : \"Unauthorized\" }", Encoding.UTF8, "application/json") };
+                }
+            }
+            catch (Exception exc)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{ \"error\": \"" + exc.Message + "\" }", Encoding.UTF8, "application/json") };
+            }
+        }
+
+        [HttpGet, Route("ActivityStatusForNewActivity")]// Implement department Logic.. and order by next activity status
+        public IHttpActionResult ActivityStatusForNewActivity(int TaskTypeId)
+        {
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser != null && objUser.UserId > 0)
+                {
+
+                    var e = new EntityBase(objUser.TSClient.ToString());
+                    DataTable dt = e.GetDataTable("spActivityStatus", new string[] { "@Type", "@TaskTypeId" }, 3, TaskTypeId);
+                    var ActivityStatusCollection = e.ConvertTo<ActivityStatus>(dt);
+                    if (ActivityStatusCollection != null && ActivityStatusCollection.Count > 0)
+                    {
+                        var item = ActivityStatusCollection.Where(x => x.ActivityStatusId == 1).ToList().FirstOrDefault();
+                        if (item != null)
+                        {
+                            ActivityStatusCollection.Remove(item);
+                        }
+                        var ActivityStatus_ItemsSource = ActivityStatusCollection;
+
+                        DataTable dt2 = e.GetDataTable("spUserActivtyPermission", new string[] { "@Type", "@UserId" }, 3, objUser.UserId);
+                        var ActivityPermissionList = e.ConvertTo<ActivityStatus>(dt2);
+
+                        List<ActivityStatus> CopyCollection = new List<ActivityStatus>();
+                        if (ActivityPermissionList.Count > 0)
+                        {
+                            foreach (var itemed in ActivityPermissionList.Where(x => x.ActivityStatusId != 0))
+                            {
+                                var items = ActivityStatusCollection.Where(x => x.ActivityStatusId == itemed.ActivityStatusId).FirstOrDefault();
+                                if (items != null && !CopyCollection.Contains(items))
+                                    CopyCollection.Add(items);
+                            }
+                            ActivityStatusCollection.Clear();
+                            ActivityStatusCollection = CopyCollection;
+
+                        }
+                        JArray ActivityCollection = new JArray();
+                        foreach (var itn in ActivityStatusCollection)
+                        {
+                            DataTable dt3 = e.GetDataTable("spTaskTypeConfiguration", new string[] { "@Type", "@TaskTypeId", "@ActivityStatusId" }, 6, TaskTypeId, itn.ActivityStatusId);
+                            if (dt3 != null && dt3.Rows.Count > 0)
+                            {
+                                var ttch = dt3.AsEnumerable().FirstOrDefault();
+                                dynamic Activity = new JObject();
+                                Activity.ActivityStatusId = itn.ActivityStatusId;
+                                Activity.Name = itn.Name;
+                                Activity.ShortName = itn.ShortName;
+                                var dttable = e.GetDataTable("spActivityStatus", new string[] { "@Type", "@ActivityStatusId" }, 2, itn.ActivityStatusId);
+                                Activity.IsRequiredEstimationTime = dttable.Rows[0].Field<bool>("IsRequiredEstimationTime");
+                                Activity.IsRequiredJobDescription = dttable.Rows[0].Field<bool>("IsRequiredDescription");
+                                Activity.IsShowTaskDueDate = ttch.Field<int>("IsShowTaskDueDate"); ;
+                                Activity.IsEmployeeInformation = ttch.Field<int>("IsEmployeeInformation");
+                                Activity.IsProductVendor = ttch.Field<int>("IsProductVendor"); ;
+                                Activity.IsDepartment = ttch.Field<int>("IsDepartment");
+                                Activity.IsCompanyBranch = ttch.Field<int>("IsCompanyBranch"); ;
+                                Activity.IsAmount = ttch.Field<int>("IsAmount");
+                                ActivityCollection.Add(Activity);
+                            }
+
+                        }
+                        var list = ActivityCollection;
+                        DataTable dt4 = e.GetDataTable("web.spDashboardTaskRegister", new string[] { "@Type", "@UserId" }, 7, objUser.UserId);
+                        return Json(new { Table = list, Table1 = dt4 });
+
+                    }
+                    return Content(HttpStatusCode.Unauthorized, new { authorization = "unauthorized" });
+
+                }
+                else
+                    return Content(HttpStatusCode.Unauthorized, new { authorization = "unauthorized" });
+            }
+            catch (Exception exc)
+            {
+                return Content(HttpStatusCode.InternalServerError, new { error = exc.Message });
+            }
+        }
+
+        [HttpGet, Route("ActivityStatusForNewTaskActivity")]// Summarized -- IMPLEMENTED
+        public IHttpActionResult ActivityStatusForNewTaskActivity(int TaskRegisterDetailId)
+        {
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser != null && objUser.UserId > 0)
+                {
+                    var e = new EntityBase(objUser.TSClient.ToString());
+                    DataSet ds = e.GetDataSet("[web].[spTaskRegister]", new string[] { "@Type", "@UserId", "@TaskRegisterDetailId" }, 3, objUser.UserId, TaskRegisterDetailId);
+                    return Json(ds);
+                    //return Json(new { Table = list, Table1 = dt4 });               
+                }
+                else
+                    return Content(HttpStatusCode.Unauthorized, new { authorization = "unauthorized" });
+            }
+            catch (Exception exc)
+            {
+                return Content(HttpStatusCode.InternalServerError, new { error = exc.Message });
+            }
+        }
+
+        [HttpGet, Route("EmployeesForNewActivity")]
+        public HttpResponseMessage EmployeesForNewActivity()//Todo move logic to database and implemnet searching
+        {
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser != null && objUser.UserId > 0)
+                {
+                    EntityBase e = new EntityBase(objUser.TSClient.ToString());
+                    var datatables = e.GetDataTable("spEmployeeInformation", new string[] {
+                        "@Type", "EmployeeInformationIds", "@CompanyBranchIds", "@DepartmentIds", "@JobStatusIds"
+                    }, 28, "", objUser.CompanyBranchId, "", "1,2,5,6");
+
+                    if (datatables.Rows.Count > 0)
+                    {
+                        var myList = datatables.AsEnumerable();
+                        var ItemsSource = myList.OrderBy(x => x.Field<string>("EmployeeNickName"));
+                        var IsEmployeeShowOnTaskRegister = new SoftwareConfigurationManager().GetConfigurationValue(objUser.TSClient.ToString(), "SelectedEmployeeShowOnTaskRegister").ToLower();
+                        if (IsEmployeeShowOnTaskRegister != string.Empty)
+                        {
+                            if (IsEmployeeShowOnTaskRegister == "1")
+                                ItemsSource = myList.Where(x => x.Field<int>("IsShowOnTaskRegister") == 1).OrderBy(y => y.Field<string>("EmployeeNickName"));
+                            else
+                                ItemsSource = myList.OrderBy(x => x.Field<string>("EmployeeNickName"));
+                        }
+                        var result = e.ConvertTo<EmployeeInformation>(ItemsSource.CopyToDataTable());
+                        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(result), System.Text.Encoding.UTF8, "application/json") };
+                    }
+
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(null), System.Text.Encoding.UTF8, "application/json") };
+
+                }
+                else
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{ \"authorization\" : \"Unauthorized\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+            catch (Exception exc)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{ \"error\": \"" + exc.Message + "\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+        }
+
+        [HttpGet, Route("EmployeeForNewActivity")]
+        public IHttpActionResult EmployeeForNewActivity(string Prefix = "")//Todo move logic to database and implemnet searching-- IMPLEMENTED
+        {
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser != null && objUser.UserId > 0)
+                {
+                    var e = new EntityBase(objUser.TSClient.ToString());
+                    var dt = e.GetDataTable("[web].[spDashboardTaskRegister]", new string[] {
+                        "@Type", "EmployeeInformationIds", "@CompanyBranchIds", "@DepartmentIds", "@JobStatusIds","@PREFIX"
+                    }, 10, "", objUser.CompanyBranchId, "", "1,2,5,6", Prefix);                   
+                    return Json(dt);
+                    //return Json(new { Table = list, Table1 = dt4 });               
+                }
+                else
+                    return Content(HttpStatusCode.Unauthorized, new { authorization = "unauthorized" });
+            }
+            catch (Exception exc)
+            {
+                return Content(HttpStatusCode.InternalServerError, new { error = exc.Message });
+            }
+        }
+
+        [HttpPost, Route("SaveTaskActivity")]
+        public HttpResponseMessage SaveTaskActivity(TaskRegisterActivity TaskRegisterActivity)
+        {
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser?.UserId > 0)
+                {
+                    List<TaskRegisterActivity> obj = new List<TaskRegisterActivity>();
+                    string Response = "";
+
+                    EntityBase e = new EntityBase(objUser.TSClient.ToString());
+                    var dt = e.GetDataTable("[web].[spTaskRegister]", new string[] 
+                    { "@Type", "@TaskRegisterDetailId", "@ActivityStatusId", "@JobDescription", "@UserId", "@DataEntryDate", "@DataEntryStatus", "@ActivityDate", "@EstimatedTime", "@TaskDueDate", "@EmployeeInformationId", "@ProductVendorId", "@DepartmentId", "@CompanyBranchId" },
+                      4, TaskRegisterActivity.TaskRegisterDetailId, TaskRegisterActivity.ActivityStatusId, TaskRegisterActivity.JobDescription, 7, TaskRegisterActivity.DataEntryDate, TaskRegisterActivity.DataEntryStatus, TaskRegisterActivity.ActivityDate, TaskRegisterActivity.EstimatedTime, TaskRegisterActivity.TaskDueDate, TaskRegisterActivity.EmployeeInformationId, TaskRegisterActivity.ProductVendorId, TaskRegisterActivity.DepartmentId, TaskRegisterActivity.CompanyBranchId);
+                    if (dt.Rows.Count > 0)
+                    {
+                        Response = dt.Rows[0].Field<string>("Message");
+                        if (Response == "Task(s) has been registered successfully")
+                        {
+                            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{ \"Message\": \"" + Response + "\" }", System.Text.Encoding.UTF8, "application/json") };
+                        }
+                        else
+                        {
+                            return new HttpResponseMessage((HttpStatusCode)422) { Content = new StringContent("{ \"Message\": \"" + Response + "\" }", System.Text.Encoding.UTF8, "application/json") };
+                        }
+                        //var ActivityStatusCollection = e.ConvertTo<ActivityStatus>(dt);
+                        //var IsAllowMultipleTask = dt.Rows[0].Field<bool>("IsAllowMultipleTask");
+                        //var ShortName = dt.Rows[0].Field<string>("ShortName");
+                        //if (IsAllowMultipleTask == false)
+                        //{
+                        //    DataTable dt2 = e.GetDataTable("spTaskRegisterDetail", new string[] {
+                        //    "@Type", "@EmployeeInformationId", "@ActivityStatusId","@TaskRegisterDetailId"}, 12, objUser.EmployeeInformationId, objActivity.ActivityStatusId, objActivity.TaskRegisterDetailId);
+                        //    obj = e.ConvertTo<TaskRegisterActivity>(dt2);
+
+                        //    if (obj.Count > 0)
+                        //    {
+                        //        var Text = ShortName;
+                        //        str = "You currently have a task on '" + Text + "' and cannot proceed with another. Would you like to pause it and put a new task on '" + Text + "'?";
+                        //        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(str), System.Text.Encoding.UTF8, "application/json") };
+                        //    }
+
+                        //}
+                        //dynamic Activity = new JObject();
+                        //var dttable = e.GetDataTable("spActivityStatus", new string[] { "@Type", "@ActivityStatusId" }, 2, objActivity.ActivityStatusId);
+                        //Activity.IsRequiredEstimationTime = dttable.Rows[0].Field<bool>("IsRequiredEstimationTime");
+                        //Activity.IsRequiredJobDescription = dttable.Rows[0].Field<bool>("IsRequiredDescription");
+
+
+                        //if (Activity.IsRequiredEstimationTime == true)
+                        //{
+                        //    if (objActivity.EstimatedTime == null)
+                        //    {
+                        //        str = "Time required to complete the given activity";
+                        //        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(str), System.Text.Encoding.UTF8, "application/json") };
+                        //    }
+                        //}
+                        //if (Activity.IsRequiredJobDescription == true)
+                        //{
+                        //    if (string.IsNullOrEmpty(objActivity.JobDescription))
+                        //    {
+                        //        str = "Job description required to complete the given activity";
+                        //        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(str), System.Text.Encoding.UTF8, "application/json") };
+                        //    }
+
+                        //}
+                    }
+
+                    //TaskRegisterActivity TaskRegisterActivity = new TaskRegisterActivity();
+                    //if (!string.IsNullOrEmpty(objActivity.JobDescription))
+                    //    TaskRegisterActivity.JobDescription = objActivity.JobDescription;
+                    //if (objActivity.EstimatedTime != null)
+                    //    TaskRegisterActivity.EstimatedTime = Convert.ToInt32(objActivity.EstimatedTime);
+                    //TaskRegisterActivity.DataEntryStatus = 1;
+                    //if (objActivity.TaskDueDate != null)
+                    //{
+                    //    TaskRegisterActivity.TaskDueDate = Convert.ToDateTime(objActivity.TaskDueDate);
+                    //}
+
+
+                    //if (objActivity.ActivityStatusId != 0)
+                    //    TaskRegisterActivity.ActivityStatusId = Convert.ToInt32(objActivity.ActivityStatusId);
+                    //if (objActivity.CompanyBranchId != null || objActivity.DepartmentId != null || objActivity.EmployeeInformationId != null || objActivity.ProductVendorId != null)
+                    //{
+                    //    if (objActivity.CompanyBranchId != null)
+                    //        TaskRegisterActivity.CompanyBranchId = Convert.ToInt32(objActivity.CompanyBranchId);
+                    //    else
+                    //        TaskRegisterActivity.CompanyBranchId = null;
+
+                    //    if (objActivity.DepartmentId != null)
+                    //        TaskRegisterActivity.DepartmentId = Convert.ToInt32(objActivity.DepartmentId);
+                    //    else
+                    //        TaskRegisterActivity.DepartmentId = null;
+
+                    //    if (objActivity.EmployeeInformationId != null)
+                    //        TaskRegisterActivity.EmployeeInformationId = Convert.ToInt32(objActivity.EmployeeInformationId);
+                    //    else
+                    //        TaskRegisterActivity.EmployeeInformationId = null;
+
+                    //    if (objActivity.ProductVendorId != null)
+                    //        TaskRegisterActivity.ProductVendorId = Convert.ToInt32(objActivity.ProductVendorId);
+                    //    else
+                    //        TaskRegisterActivity.ProductVendorId = null;
+                    //}
+                    //else
+                    //{
+                    //    if (objActivity.EmployeeInformationId != null)
+                    //    {
+                    //        TaskRegisterActivity.EmployeeInformationId = objActivity.EmployeeInformationId;
+                    //    }
+                    //    else
+                    //    {
+                    //        TaskRegisterActivity.EmployeeInformationId = objUser.EmployeeInformationId;
+                    //    }
+
+                    //}
+
+                    //TaskRegisterActivity.DataEntryDate = DateTime.Now; //Convert.ToDateTime(DCActivityDate.Value);))
+                    //if (objActivity.ActivityDate != null)
+                    //{
+                    //    TaskRegisterActivity.ActivityDate = objActivity.ActivityDate;
+                    //}
+                    //else
+                    //{
+                    //    TaskRegisterActivity.ActivityDate = DateTime.Now;
+                    //}
+                       
+                    //if (objActivity.TaskRegisterDetailId != 0)
+                    //    TaskRegisterActivity.TaskRegisterDetailId = Convert.ToInt32(objActivity.TaskRegisterDetailId);
+
+
+                    //TaskRegisterActivity.UserId = objUser.UserId;
+
+                    //var result = e.InsertRecord("[web].[spTaskRegister]", new string[] { "@Type", "@TaskRegisterDetailId", "@ActivityStatusId", "@JobDescription", "@UserId", "@DataEntryDate", "@DataEntryStatus", "@ActivityDate", "@EstimatedTime", "@TaskDueDate", "@EmployeeInformationId", "@ProductVendorId", "@DepartmentId", "@CompanyBranchId" },
+                    //    2, TaskRegisterActivity.TaskRegisterDetailId, TaskRegisterActivity.ActivityStatusId, TaskRegisterActivity.JobDescription, TaskRegisterActivity.UserId, TaskRegisterActivity.DataEntryDate, TaskRegisterActivity.DataEntryStatus, TaskRegisterActivity.ActivityDate, TaskRegisterActivity.EstimatedTime, TaskRegisterActivity.TaskDueDate, TaskRegisterActivity.EmployeeInformationId, TaskRegisterActivity.ProductVendorId, TaskRegisterActivity.DepartmentId, TaskRegisterActivity.CompanyBranchId);
+                    //if (result == true)
+                    //{
+                    //    str = "Task(s) has been registered successfully";
+                    //}
+                    ////e.InsertRecord("web.spBranchEmployeeCount", new string[] { "@Type", "@CompanyBranchId", "@EmployeeCount", "@ApplyDate", "@UserId" }, 3, _CompanyBranchId, _EmployeeCount, _ApplyDate, _UserId);
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(Response), System.Text.Encoding.UTF8, "application/json") };
+                }
+                else
+                {
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{ \"authorization\" : \"Unauthorized\" }", System.Text.Encoding.UTF8, "application/json") };
+                }
+            }
+            catch (Exception exc)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{ \"error\": \"" + exc.Message + "\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+        }
+
+
+
+        [HttpGet, Route("TaskScheduler")]
+        public HttpResponseMessage TaskScheduler(DateTime FromDate, DateTime ToDate, string EmployeeInformationIds = "")
+        {
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser != null && objUser.UserId > 0)
+                {
+
+                    var result = new EntityBase(objUser.TSClient.ToString()).GetDataTable("[web].[spDashboardTaskRegister]", new string[] { "@Type", "@EmployeeInformationIds","@FromDate","@ToDate" }, 8, EmployeeInformationIds,FromDate,ToDate);
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(result), System.Text.Encoding.UTF8, "application/json") };
+                }
+                else
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{ \"authorization\" : \"Unauthorized\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+            catch (Exception exc)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{ \"error\": \"" + exc.Message + "\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+        }
+
+        [HttpGet, Route("DeleteTaskActivity")]
+        public HttpResponseMessage DeleteTaskActivity(int TaskRegisterActivityId)
+        {
+            try
+            {
+                UserServices us = new UserServices();
+                var objUser = us.GetCustomRequestObject<UserLogin>(Request, "UserObject");
+                if (objUser?.UserId > 0)
+                {
+                    var str = "";
+                    EntityBase e = new EntityBase(objUser.TSClient.ToString());
+                     var result = e.UpdateRecord("spTaskRegisterActivity", new string[] { "@Type", "@TaskRegisterActivityId", }, 7, TaskRegisterActivityId);
+                    if (result == true)
+                    {
+                        str = "Deleted Successfully";
+                        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(str), System.Text.Encoding.UTF8, "application/json") };
+                    }
+                   
+                    return new HttpResponseMessage(HttpStatusCode.Ambiguous) { Content = new StringContent(Newtonsoft.Json.JsonConvert.SerializeObject(str), System.Text.Encoding.UTF8, "application/json") };
+                }
+                else
+                {
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{ \"authorization\" : \"Unauthorized\" }", System.Text.Encoding.UTF8, "application/json") };
+                }
+            }
+            catch (Exception exc)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{ \"error\": \"" + exc.Message + "\" }", System.Text.Encoding.UTF8, "application/json") };
+            }
+        }
+
+
+    }
+}
