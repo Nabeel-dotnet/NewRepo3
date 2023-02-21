@@ -1,0 +1,89 @@
+USE [FDITS-BE]
+GO
+
+
+DECLARE @SaleInvoiceIds VARCHAR(MAX)=5057805;--Currently being accepting single value
+DECLARE @LedgerId INT=null
+DECLARE @flt_SaleInvoice TABLE(SaleInvoiceId BIGINT)
+
+IF @LedgerId IS NOT NULL
+BEGIN
+INSERT INTO @flt_SaleInvoice 
+SELECT SaleinvoiceId 
+FROM Ledger AS l WHERE l.LedgerId=@LedgerId AND l.SaleInvoiceId IS NOT NULL
+
+IF NOT EXISTS(SELECT TOP 1 * FROM @flt_SaleInvoice)
+BEGIN
+PRINT 'Getting from posting detail'
+INSERT INTO @flt_SaleInvoice 
+SELECT DISTINCT sipm.SaleInvoiceId
+FROM 
+Ledger AS l 
+INNER JOIN LedgerPosting AS lp ON l.LedgerId=lp.LedgerId
+INNER JOIN LedgerPostingDetail AS lpd ON lp.LedgerPostingId=lpd.LedgerPostingId
+INNER JOIN SaleInvoicePaymentMode AS sipm ON lpd.SaleInvoicePaymentModeId=sipm.SaleInvoicePaymentModeId
+INNER JOIN SaleInvoice AS si ON sipm.SaleInvoiceId=si.SaleInvoiceId
+WHERE l.SaleInvoiceId IS NULL AND l.LedgerId=@LedgerId
+END
+
+SELECT @SaleInvoiceIds=STUFF(
+(SELECT ','+CAST(SaleinvoiceId AS NVARCHAR) FROM @flt_SaleInvoice FOR XML PATH('')),1,1,'')
+END
+
+
+--DECLARE @InvId varchar(20)=(Select SaleInvoiceId FROM SaleInvoice where InvoiceNumber='102540' AND Year(InvoiceDate)=2020 AND Month(InvoiceDate)=12)
+DECLARE @ParentInvoiceId INT=ISNULL((Select SaleInvoiceId FROM SaleInvoice where SaleInvoiceParentId=@SaleInvoiceIds),'')
+DECLARE @tempTableName NVARCHAR(MAX)='##tempSalData_'+FORMAT(GETDATE(),'yyyyMMddHmmss')
+print @tempTableName
+--PRINT CASE WHEN @ParentInvoiceId>0 THEN ','+CAST(@ParentInvoiceId AS VARCHAR) END
+--PRINT CASE WHEN @ParentInvoiceId>0 THEN CAST(@InvoiceIds AS VARCHAR)+','+CAST(@ParentInvoiceId AS VARCHAR) ELSE CAST(@InvoiceIds AS VARCHAR) END
+EXEC spSaleData @Type=11,@InvoiceIds=5057805, @IsInsertInvData=1,@InvDataTableName=@tempTableName
+--EXEC('SELECT * FROM '+@tempTableName)
+--select * from 
+SELECT CN.ClientInformationId,CT.ContactTypeParent,CN.ContactNo,RANK() OVER (PARTITION BY CN.ClientInformationId,CT.ContactTypeParent ORDER BY CN.DefaultNumber DESC, CN.DataEntryDate DESC,CN.ContactNumberId DESC) AS SortOrder
+	INTO  #tmpContact_16
+	FROM ContactNumber AS CN
+	INNER JOIN ContactType AS CT ON CN.ContactTypeId=CT.ContactTypeId
+	WHERE CN.DataEntryStatus=1
+
+DECLARE @QUERY NVARCHAR(MAX)=
+'SELECT t.InvoiceId,t.InvoiceNumber,t.InvoiceDate,t.ClientInformationId,ci.ClientName
+,t.ProductItemId,p.Barcode,p.LongName AS ProductName
+,t.Quantity,t.SaleRate AS Price,t.ItemGrossAmount AS GrossAmount,t.ItemGrossAmount+t.GST AS GrossAmountWithTax,t.SaleRateDiscount AS ItemDiscount,t.DiscountRate,t.ItemNetAmount
+,sii.DiscountComments AS ItemDiscountComments,sii.ComplimentaryRemarks,t.GST as GSTAmount,t.GSTPercentage,InvDiscountAmt as InvoiceDiscount,A.ContactNo as ClientPhoneNumber,B.Address as ClientAddress,C.SalesmanId,C.FirstName
+,Case When mi.MemberInformationId > 0 then 1 else 0 end as IsMember
+,Case when DI.DebtorInformationId > 0 then 1 else 0 end as IsDebtor
+FROM '+@tempTableName+' t
+INNER JOIN ClientInformation ci ON t.ClientInformationId=ci.ClientInformationId
+LEFT JOIN MemberInformation mi ON mi.ClientInformationId=ci.ClientInformationId
+LEFT JOIN DebtorInformation DI ON DI.ClientInformationId=ci.ClientInformationId
+INNER JOIN 
+   (SELECT Distinct EI.FirstName,SI.ClientInformationId,SI.SalesmanId,RANK() OVER (PARTITION BY SI.ClientInformationId ORDER BY SI.SalesmanId DESC) AS SortOrder
+	FROM SaleInvoice AS SI
+	LEFT JOIN EmployeeInformation EI on EI.EmployeeInformationId = SI.SalesmanId
+	WHERE SI.ClientInformationId=(SELECT DISTINCT ClientInformationId FROM '+@tempTableName+') 
+    AND SI.DataEntryStatus=1) AS C
+	ON C.ClientInformationId=ci.ClientInformationId and C.SortOrder=1
+INNER JOIN 
+   (SELECT Distinct CN.ClientInformationId,CT.ContactTypeParent,CN.ContactNo,RANK() OVER (PARTITION BY CN.ClientInformationId,CT.ContactTypeParent ORDER BY CN.DefaultNumber DESC, CN.DataEntryDate DESC,CN.ContactNumberId DESC) AS SortOrder
+	FROM ContactNumber AS CN
+	INNER JOIN ContactType AS CT ON CN.ContactTypeId=CT.ContactTypeId
+	WHERE CN.ClientInformationId=(SELECT DISTINCT ClientInformationId FROM '+@tempTableName+') 
+    AND CN.DataEntryStatus=1) AS A 
+	ON A.ClientInformationId=ci.ClientInformationId AND A.ContactTypeParent=2 AND A.SortOrder=1
+INNER JOIN 
+    (SELECT Distinct CA.ClientInformationId,CA.Address,RANK() OVER (PARTITION BY CA.ClientInformationId ORDER BY CA.DefaultAddress DESC, CA.DataEntryDate DESC) AS SortOrders
+	FROM ContactAddress AS CA
+	WHERE CA.ClientInformationId=(SELECT DISTINCT ClientInformationId FROM '+@tempTableName+')  
+	AND CA.DataEntryStatus=1) AS B 
+	ON B.ClientInformationId=ci.ClientInformationId  AND B.SortOrders=1
+INNER JOIN ProductItem p ON t.ProductItemId=p.ProductItemId
+INNER JOIN SaleInvoiceItem sii ON sii.SaleInvoiceId IN('+CASE WHEN @ParentInvoiceId>0 THEN CAST(@SaleInvoiceIds AS VARCHAR)+','+CAST(@ParentInvoiceId AS VARCHAR) ELSE CAST(@SaleInvoiceIds AS VARCHAR) END+') AND t.ProductItemId=sii.ProductItemId
+AND t.DetailId=sii.SaleInvoiceItemId 
+ORDER BY t.SaleRateDiscount desc'
+
+EXEC(@QUERY)
+print @tempTableName
+
+EXEC('DROP TABLE '+@tempTableName)
+DROP TABLE #tmpContact_16
